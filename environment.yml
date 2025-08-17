@@ -1,0 +1,12 @@
+name: nba-etl
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pandas
+  - sqlalchemy
+  - psycopg2
+  - jupyter
+  - pip
+  - pip:
+      - nba_api
