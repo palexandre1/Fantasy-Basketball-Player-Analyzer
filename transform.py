@@ -26,7 +26,7 @@ def transform_teams(cache_file="teams_static.csv"):
 
         return teams_df
 
-def transform_players(df, cache_file="players_static.csv"):
+def transform_players(df):
     """
     Transform raw stats DataFrame into a players DataFrame for Postgres.
     Uses NBA static data to populate player attributes (position, height, weight, team_id).
@@ -51,4 +51,59 @@ def transform_players(df, cache_file="players_static.csv"):
 
     return player_stats[['player_id', 'first_name', 'last_name', 'position', 'team_id', 'height', 'weight']]
 
-def player_game_stats(df):
+def transform_player_stats(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """Transform raw NBA stats dataframe to match Postgres schema for player_game_stats."""
+
+    # Select and rename columns to match schema
+    column_mapping = {
+        "PLAYER_ID": "player_id",
+        "TEAM_ID": "team_id",
+        "MIN": "minutes",
+        "PTS": "points",
+        "DREB": "defensive_rebounds",
+        "OREB": "offensive_rebounds",
+        "REB": "total_rebounds",
+        "AST": "assists",
+        "STL": "steals",
+        "BLK": "blocks",
+        "TOV": "turnovers",
+        "FGA": "fga",
+        "FGM": "fgm",
+        "FG_PCT": "fg_pct",
+        "FT_PCT": "ft_pct",
+        "FG3A": "three_pta",
+        "FG3M": "three_ptm",
+        "FG3_PCT": "three_pct",
+        "PF": "fouls",
+    }
+
+    df = df_raw[list(column_mapping.keys())].rename(columns=column_mapping)
+
+    # ---- Handle minutes conversion ----
+    def convert_minutes_to_float(min_str):
+        if isinstance(min_str, str) and ":" in min_str:
+            mins, secs = min_str.split(":")
+            val = int(mins) + int(secs) / 60
+            return round(val, 2)
+        try:
+            return round(float(min_str), 2)  # already numeric (edge case)
+        except:
+            return 0.0  # handle missing values safely
+
+    df["minutes"] = df["minutes"].apply(convert_minutes_to_float)
+
+    # Ensure correct data types (important for Postgres load)
+    int_cols = [
+        "player_id", "team_id", "points", "defensive_rebounds",
+        "offensive_rebounds", "total_rebounds", "assists", "steals",
+        "blocks", "turnovers", "fga", "fgm", "three_pta",
+        "three_ptm", "fouls"
+    ]
+    float_cols = ["minutes", "fg_pct", "ft_pct", "three_pct"]
+
+    df[int_cols] = df[int_cols].astype(int)
+    df[float_cols] = df[float_cols].astype(float)
+
+    return df
+
+
