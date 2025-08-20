@@ -51,7 +51,7 @@ def transform_players(df):
 
     return player_stats[['player_id', 'first_name', 'last_name', 'position', 'team_id', 'height', 'weight']]
 
-def transform_player_stats(df_raw: pd.DataFrame) -> pd.DataFrame:
+def transform_player_stats(df_raw: pd.DataFrame, season: str) -> pd.DataFrame:
     """Transform raw NBA stats dataframe to match Postgres schema for player_game_stats."""
 
     # Select and rename columns to match schema
@@ -70,6 +70,8 @@ def transform_player_stats(df_raw: pd.DataFrame) -> pd.DataFrame:
         "FGA": "fga",
         "FGM": "fgm",
         "FG_PCT": "fg_pct",
+        "FTA": "fta",
+        "FTM": "ftm",
         "FT_PCT": "ft_pct",
         "FG3A": "three_pta",
         "FG3M": "three_ptm",
@@ -97,13 +99,35 @@ def transform_player_stats(df_raw: pd.DataFrame) -> pd.DataFrame:
         "player_id", "team_id", "points", "defensive_rebounds",
         "offensive_rebounds", "total_rebounds", "assists", "steals",
         "blocks", "turnovers", "fga", "fgm", "three_pta",
-        "three_ptm", "fouls"
+        "three_ptm", "fta", "ftm", "fouls"
     ]
     float_cols = ["minutes", "fg_pct", "ft_pct", "three_pct"]
 
     df[int_cols] = df[int_cols].astype(int)
     df[float_cols] = df[float_cols].astype(float)
 
+    df['season'] = season
+
     return df
 
+def aggregate_player_game_stats(df):
+    # --- Aggregate player_game_stats across teams per season ---
+    sum_cols = [
+        "minutes", "points", "defensive_rebounds", "offensive_rebounds",
+        "total_rebounds", "assists", "steals", "blocks", "turnovers",
+        "fga", "fgm", "three_pta", "three_ptm", "fta", "ftm", "fouls"
+    ]
 
+    # Group by player and season, sum counting stats
+    df_agg = df.groupby(["player_id", "season"], as_index=False)[sum_cols].sum()
+
+    # Recompute percentages correctly
+    df_agg["fg_pct"] = (df_agg["fgm"] / df_agg["fga"]).fillna(0).round(2)
+    df_agg["ft_pct"] = (df_agg["ftm"] / df_agg["fta"]).fillna(0).round(2)
+    df_agg["three_pct"] = (df_agg["three_ptm"] / df_agg["three_pta"]).fillna(0).round(2)
+
+    return df_agg
+
+def deduplicate_players(df):
+    df.drop_duplicates(subset="player_id", inplace=True)
+    return df
