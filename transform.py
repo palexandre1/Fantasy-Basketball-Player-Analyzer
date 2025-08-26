@@ -1,6 +1,7 @@
 import pandas as pd
 from nba_api.stats.static import teams as static_teams
 import os
+from helpers.convertMinutesToFloat import convert_minutes_to_float
 
 def transform_teams(cache_file="teams_static.csv"):
     """Transform NBA static teams data for Postgres."""
@@ -58,6 +59,7 @@ def transform_player_stats(df_raw: pd.DataFrame, season: str) -> pd.DataFrame:
     column_mapping = {
         "PLAYER_ID": "player_id",
         "TEAM_ID": "team_id",
+        "GP": "games_played",
         "MIN": "minutes",
         "PTS": "points",
         "DREB": "defensive_rebounds",
@@ -77,31 +79,20 @@ def transform_player_stats(df_raw: pd.DataFrame, season: str) -> pd.DataFrame:
         "FG3M": "three_ptm",
         "FG3_PCT": "three_pct",
         "PF": "fouls",
+        "NBA_FANTASY_PTS": "fantasy_points"
     }
 
     df = df_raw[list(column_mapping.keys())].rename(columns=column_mapping)
-
-    # ---- Handle minutes conversion ----
-    def convert_minutes_to_float(min_str):
-        if isinstance(min_str, str) and ":" in min_str:
-            mins, secs = min_str.split(":")
-            val = int(mins) + int(secs) / 60
-            return round(val, 2)
-        try:
-            return round(float(min_str), 2)  # already numeric (edge case)
-        except:
-            return 0.0  # handle missing values safely
-
     df["minutes"] = df["minutes"].apply(convert_minutes_to_float)
 
     # Ensure correct data types (important for Postgres load)
     int_cols = [
-        "player_id", "team_id", "points", "defensive_rebounds",
+        "player_id", "team_id", "games_played", "points", "defensive_rebounds",
         "offensive_rebounds", "total_rebounds", "assists", "steals",
         "blocks", "turnovers", "fga", "fgm", "three_pta",
         "three_ptm", "fta", "ftm", "fouls"
     ]
-    float_cols = ["minutes", "fg_pct", "ft_pct", "three_pct"]
+    float_cols = ["minutes", "fg_pct", "ft_pct", "three_pct", "fantasy_points"]
 
     df[int_cols] = df[int_cols].astype(int)
     df[float_cols] = df[float_cols].astype(float)
@@ -113,9 +104,10 @@ def transform_player_stats(df_raw: pd.DataFrame, season: str) -> pd.DataFrame:
 def aggregate_player_game_stats(df):
     # --- Aggregate player_game_stats across teams per season ---
     sum_cols = [
-        "minutes", "points", "defensive_rebounds", "offensive_rebounds",
+        "games_played", "minutes", "points", "defensive_rebounds", "offensive_rebounds",
         "total_rebounds", "assists", "steals", "blocks", "turnovers",
-        "fga", "fgm", "three_pta", "three_ptm", "fta", "ftm", "fouls"
+        "fga", "fgm", "three_pta", "three_ptm", "fta", "ftm", "fouls",
+        "fantasy_points"
     ]
 
     # Group by player and season, sum counting stats
@@ -131,3 +123,94 @@ def aggregate_player_game_stats(df):
 def deduplicate_players(df):
     df.drop_duplicates(subset="player_id", inplace=True)
     return df
+
+
+def normalize_games_df(games_df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize raw GameHeader dataframe into desired format with a surrogate key."""
+    games_df = games_df[["GAME_ID", "GAME_DATE_EST", "SEASON", "HOME_TEAM_ID", "VISITOR_TEAM_ID"]].copy()
+
+    home = games_df[["GAME_ID", "GAME_DATE_EST", "SEASON", "HOME_TEAM_ID"]].copy()
+    home.rename(columns={
+        "GAME_DATE_EST": "game_date",
+        "SEASON": "season_id",
+        "HOME_TEAM_ID": "team_id",
+        "GAME_ID": "game_id"
+    }, inplace=True)
+
+    away = games_df[["GAME_ID", "GAME_DATE_EST", "SEASON", "VISITOR_TEAM_ID"]].copy()
+    away.rename(columns={
+        "GAME_DATE_EST": "game_date",
+        "SEASON": "season_id",
+        "VISITOR_TEAM_ID": "team_id",
+        "GAME_ID": "game_id"
+    }, inplace=True)
+
+    normalized = pd.concat([home, away], ignore_index=True)
+
+    normalized["game_id"] = normalized["game_id"].astype(str)
+    normalized["game_date"] = pd.to_datetime(normalized["game_date"]).dt.date
+    normalized["season_id"] = normalized["season_id"].astype(str)
+    normalized["team_id"] = normalized["team_id"].astype(int)
+
+    normalized["game_team_id"] = normalized["game_id"].astype(str) + "_" + normalized["team_id"].astype(str)
+    normalized = normalized[["game_team_id", "game_id", "game_date", "season_id", "team_id"]]
+
+    return normalized
+
+def normalize_player_game_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize raw boxscore dataframe to match player_game_stats schema
+    and compute fantasy points:"""
+
+    df = raw_df.copy()
+
+    # Rename columns to match schema
+    df.rename(columns={
+        "PLAYER_ID": "player_id",
+        "GAME_ID": "game_id",
+        "TEAM_ID": "team_id",
+        "MIN": "minutes",
+        "FGM": "fgm",
+        "FGA": "fga",
+        "FG_PCT": "fg_pct",
+        "FG3M": "fg3m",
+        "FG3A": "fg3a",
+        "FG3_PCT": "fg3_pct",
+        "FTM": "ftm",
+        "FTA": "fta",
+        "FT_PCT": "ft_pct",
+        "OREB": "oreb",
+        "DREB": "dreb",
+        "REB": "reb",
+        "AST": "ast",
+        "STL": "stl",
+        "BLK": "blk",
+        "TO": "turnovers",
+        "PF": "pf",
+        "PTS": "pts",
+        "PLUS_MINUS": "plus_minus"
+    }, inplace=True)
+
+    df["minutes"] = df["minutes"].apply(convert_minutes_to_float)
+
+    # Fill missing numeric values with 0
+    numeric_cols = ["fgm","fga","fg_pct","fg3m","fg3a","fg3_pct","ftm","fta","ft_pct",
+                    "oreb","dreb","reb","ast","stl","blk","turnovers","pf","pts","plus_minus"]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    # Compute fantasy points
+    df["fantasy_points"] = (
+        df["pts"] + 1.2*df["reb"] + 1.5*df["ast"] + 3*df["stl"] + 3*df["blk"] - 1*df["turnovers"]
+    )
+
+    # Keep only columns in schema
+    schema_cols = ["player_id", "game_id", "team_id", "minutes", "fgm","fga","fg_pct","fg3m","fg3a",
+                   "fg3_pct","ftm","fta","ft_pct","oreb","dreb","reb","ast","stl","blk",
+                   "turnovers","pf","pts","plus_minus","fantasy_points"]
+
+    df = df[schema_cols]
+    df["game_id"] = df["game_id"].astype(str).str.zfill(10)
+    df["game_team_id"] = df["game_id"] + "_" + df["team_id"].astype(str)
+
+    return df
+
