@@ -21,7 +21,7 @@ This project extracts, transforms, and loads NBA player statistics into a Postgr
 - Tables include:  
   - **player** – player metadata  
   - **player_per_game_stats** – game-level player stats  
-- Optional: SQL Views can be created for summary stats, z-scores, and breakout player detection.  
+- Optional: SQL Views can be created for summary stats and z-scores  
 
 ## Analysis Examples  
 Once data is in Postgres, you can query:  
@@ -49,3 +49,7 @@ Create the environment from `environment.yml`:
 conda env create -f environment.yml
 conda activate nba-etl
 ```
+
+2. Build your database and tables, can rename the columns in transform.py if necessary.
+3. Create a config.py and build connection strings
+4. Run ETL script, comment out segments that aren't needed.
