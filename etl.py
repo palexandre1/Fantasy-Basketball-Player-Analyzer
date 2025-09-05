@@ -47,7 +47,7 @@ def main():
     # load_table(teams_df, "team")
     # load_table(players_df, "player")
     # load_table(player_stats_df, "player_game_stats" )
-    load_table(games_df, "games")
+    # load_table(games_df, "games")
     load_table(player_per_game_stats_df, "player_per_game_stats")
     print("✅ Load completed")
 

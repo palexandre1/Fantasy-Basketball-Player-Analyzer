@@ -199,9 +199,7 @@ def normalize_player_game_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
     # Compute fantasy points
-    df["fantasy_points"] = (
-        df["pts"] + 1.2*df["reb"] + 1.5*df["ast"] + 3*df["stl"] + 3*df["blk"] - 1*df["turnovers"]
-    )
+    df["fantasy_points"] = compute_fantasy_points(df)
 
     # Keep only columns in schema
     schema_cols = ["player_id", "game_id", "team_id", "minutes", "fgm","fga","fg_pct","fg3m","fg3a",
@@ -214,3 +212,42 @@ def normalize_player_game_stats(raw_df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def compute_fantasy_points(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute fantasy points for each row in the DataFrame based on custom league scoring."""
+
+    # Calculate misses
+    fgmi = df["fga"] - df["fgm"]
+    ftmi = df["fta"] - df["ftm"]
+    fg3mi = df["fg3a"] - df["fg3m"]
+
+    # Base fantasy score
+    points = (
+        1.0 * df["pts"]
+        + 1.0 * df["dreb"]
+        + 1.1 * df["oreb"]
+        + 1.25 * df["ast"]
+        + 1.25 * df["stl"]
+        + 1.25 * df["blk"]
+        + 0.75 * df["fgm"]
+        + 1.15 * df["fg3m"]
+        + 0.85 * df["ftm"]
+        - 0.55 * fgmi
+        - 0.65 * fg3mi
+        - 1.0 * ftmi
+        - 1.25 * df["turnovers"]
+        - 1.0 * df["pf"]
+    )
+
+    # Double/Triple/Quadruple doubles (pts, reb, ast, stl, blk)
+    reb = df["oreb"] + df["dreb"]
+    categories = ["pts", "ast", "stl", "blk"]
+    double_stats_count = df[categories].ge(10).sum(axis=1) + (reb >= 10)
+
+    # Add bonuses
+    points += (
+        5 * (double_stats_count >= 2)
+        + 10 * (double_stats_count >= 3)
+        + 600 * (double_stats_count >= 4)
+    )
+
+    return points

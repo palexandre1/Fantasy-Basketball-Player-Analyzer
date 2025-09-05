@@ -122,7 +122,7 @@ def extract_player_game_stats_for_game(game_id: str, cache_dir="player_game_cach
                 return pd.DataFrame()
 
             df = raw_dfs[0]  # Player stats
-            normalized = normalize_player_game_stats(df)  # Your normalization function
+            normalized = normalize_player_game_stats(df)  # normalization function
             normalized.to_csv(cache_file, index=False)
             print(f"[FETCHED] Stats for {game_id}")
             # Polite random delay
